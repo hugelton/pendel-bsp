@@ -535,7 +535,10 @@ static int get_desc(uint32_t wvalue, const uint8_t **d, uint16_t *l)
 }
 
 /* ---------------------------------------------------------- the SIE --- */
-static void sie_wr(uint32_t r, uint32_t v)
+/* Not inlined: a call is a compiler barrier around each SIE access. Inlined (at -O2), the compiler moves the
+ * callers' plain memory accesses (the EP0 buffer the DMA fills, the state) across the polls, and the host
+ * resets the device as soon as the CDC port opens (seen on a Pocket AMP, 2026-11-02; -Os happened not to). */
+static __attribute__((noinline)) void sie_wr(uint32_t r, uint32_t v)
 {
     uint32_t n = 20000;
     if (!fm1_usb_sie_on())
@@ -549,7 +552,7 @@ static void sie_wr(uint32_t r, uint32_t v)
         usb.up = 0;                                     /* SIE dead (no clock?): stop polling it */
 }
 
-static uint32_t sie_rd(uint32_t r)
+static __attribute__((noinline)) uint32_t sie_rd(uint32_t r)
 {
     uint32_t n = 20000;
     if (!fm1_usb_sie_on())
