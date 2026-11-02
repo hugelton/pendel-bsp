@@ -48,3 +48,8 @@ Kerem licenses his contributions to this port under MPL-2.0 as well. The origina
 Melodee copies remain GPL-3.0-only. chip/usb.c retains Felucca's device code, with new
 MPL-2.0 integration by Kerem Kilic. The host's register sequences follow the public
 AC79 SDK; no SDK implementation source is copied into this port.
+
+pendel-bsp
+This repository is a branch of felucca-bsp (https://github.com/hugelton/felucca-bsp), carrying its history, for
+Pendel, the firmware for the M-VAVE Pocket AMP. boards/pocketamp/ and examples/pa-hwtest/ are Leo Kuroshita's
+(Hügelton Instruments), MPL-2.0. No vendor code or data is included.
