@@ -4,7 +4,17 @@
  * (ldr_progress), in the installer page's colours. The panel is started as the app's lcd.c does (fm1-base
  * device/lcd.c: reset, sleep out, RGB565, IPS inversion), polled, at Felucca's SPI1 rate (BAUD 4).
  * Part of loader.c's single unit; every buffer is in RAM (the SPI DMA reads RAM only). */
+#ifdef LDR_LCD_POCKETAMP                           /* the Pocket AMP's panel: its own init table (pa_lcd_init.h) */
+#include "../boards/pocketamp/pa_lcd_hw.h"
+#include "../boards/pocketamp/pa_lcd_init.h"
+#define fm1_lcd_hw_init pa_lcd_hw_init
+#define fm1_lcd_send_cmd pa_lcd_send_cmd
+#define fm1_lcd_send_data pa_lcd_send_data
+#define fm1_lcd_wait pa_lcd_wait
+#define fm1_lcd_deselect pa_lcd_deselect
+#else
 #include "../boards/fm1/fm1_lcd_hw.h"
+#endif
 
 #define SCR_BG 0xFFBDu                              /* #faf4e8 cream */
 #define SCR_FG 0x49C5u                              /* #48392f brown */
@@ -111,6 +121,23 @@ static void ldr_screen_init(void)
     fm1_delay_ms(20);
     scr_cmd(0x01);                                  /* SWRESET */
     fm1_delay_ms(150);
+#ifdef LDR_LCD_POCKETAMP
+    {
+        uint8_t *buf = (uint8_t *)scr_strip;
+        uint32_t i, j;
+        for (i = 0; i < sizeof PA_LCD_INIT / sizeof PA_LCD_INIT[0]; i++) {
+            if (PA_LCD_INIT[i].cmd == PA_LCD_INIT_DELAY) {
+                fm1_delay_ms(PA_LCD_INIT[i].len);
+                continue;
+            }
+            scr_cmd(PA_LCD_INIT[i].cmd);
+            for (j = 0; j < PA_LCD_INIT[i].len; j++)
+                buf[j] = PA_LCD_INIT[i].data[j];            /* the SPI DMA reads RAM only */
+            if (PA_LCD_INIT[i].len)
+                scr_data(buf, PA_LCD_INIT[i].len);
+        }
+    }
+#else
     scr_cmd(0x11);                                  /* SLPOUT */
     fm1_delay_ms(120);
     scr_cmd(0x3A);                                  /* COLMOD: RGB565 */
@@ -121,6 +148,7 @@ static void ldr_screen_init(void)
     scr_data(scr_small, 1);
     scr_cmd(0x21);                                  /* INVON: IPS panel */
     scr_cmd(0x13);                                  /* NORON */
+#endif
     scr_fill(0, 0, 240, 240, SCR_BG);
     scr_text(76, "UPDATING", 3);
     scr_text(110, "DO NOT UNPLUG", 2);

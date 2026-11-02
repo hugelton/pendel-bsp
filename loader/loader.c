@@ -11,14 +11,18 @@
 #define FELUCCA_CDC 0
 #define FELUCCA_OTA 1
 #define FELUCCA_OTA_DRYRUN 0
+#ifndef FELUCCA_ID                              /* a board's loader sets these, FL_RANGE_OK and LDR_APP_HI.. */
 #define FELUCCA_USB_PID 0x0002
 #define FELUCCA_ID "ota-FM-1_900"
+#endif
 #define RING_PUBLISH() __asm__ volatile("" ::: "memory")
 #include "fm1_time.h"
 #include "fm1_sys.h"
 /* the loader may write the app area and erase update records; never the head, nor Felucca's store
  * [0x97000, 0xE0000) (user data, never a record: ldr_core.c) */
+#ifndef FL_RANGE_OK
 #define FL_RANGE_OK(off, n) (FL_IN(off, n, 0x4000u, 0x97000u) || FL_IN(off, n, 0xE0000u, 0xFC000u))
+#endif
 #include "fm1_flash.h"
 #include "../chip/libc.c"
 #include "../chip/usb.c"

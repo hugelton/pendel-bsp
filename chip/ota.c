@@ -22,8 +22,19 @@
  *   ota_show(step, code)       progress / result for the screen
  *   ota_commit(parm)           write RAM record + reset (never returns on hardware)
  */
+#ifndef OTA_AREA                                 /* a board sets these for its own flash layout */
 #define OTA_AREA 0x000E0000u                     /* staged loader, 5 x 4 KiB */
 #define OTA_AREA_LEN 0x5000u
+#endif
+#ifndef OTA_LOADER_ID
+#define OTA_LOADER_ID "ota-FM-1_015"             /* the identity the staged loader answers (the record names it) */
+#endif
+#ifndef OTA_LOADER_MARK
+#define OTA_LOADER_MARK "FELUCCA-LOADER-1"       /* 16 bytes: crt0_ldr.S of this firmware's own loader */
+#endif
+#ifndef OTA_BOARD
+#define OTA_BOARD "fm1"                          /* a bootloader that names its board must name this one */
+#endif
 #define OTA_RES (OTA_AREA + OTA_AREA_LEN - 0x100u)  /* 0xE4F00 = 4K boundary - 256: SPL scan */
 #define OTA_FRAME_MAX 640u                       /* 512-B response = 605 wire bytes */
 
@@ -252,7 +263,7 @@ static int ota_boot_valid(uint32_t fl_off, uint32_t fl_len, uint8_t *b)
         pcrc = ota_crc16(b + h, n - h, pcrc);
         fcrc = ota_crc16(b + h, n - h, fcrc);
         if (!i && ota_memeq(b + 16 + 0x40, (const uint8_t *)"AC79BLID", 8) &&
-            !ota_memeq(b + 16 + 0x48, (const uint8_t *)"fm1", 4))
+            !ota_memeq(b + 16 + 0x48, (const uint8_t *)OTA_BOARD, sizeof OTA_BOARD))
             return -5;                                      /* another board's */
     }
     return pcrc == pwant && fcrc == dcrc ? 0 : -5;
@@ -327,7 +338,7 @@ static int ota_stage(void)                       /* steps 1..6; 0 = host said su
         ota_rd32(b + 0x20 + 8) != 0x01C0A800u)
         return -7;
     for (i = 0x48, own = 0; i + 16u <= 0x48u + 64u && !own; i++)    /* first LZ4 literals: crt0_ldr.S */
-        own = ota_memeq(b + i, (const uint8_t *)"FELUCCA-LOADER-1", 16) && ota_rd32(b + 0x20 + 4) <= 0x14000u;
+        own = ota_memeq(b + i, (const uint8_t *)OTA_LOADER_MARK, 16) && ota_rd32(b + 0x20 + 4) <= 0x14000u;
     /* 3. a flash image with it: Felucca's writer never writes its head (the app area only); any other may,
      *    so its boot area must be a bootable one for the FM-1 (no flash.bin: the writer brings its own) */
     if (fl_off && !own) {
@@ -401,8 +412,8 @@ static int ota_session(void)
     ota_wr16(parm + 2, 0x5A0Du);
     ota_wr16(parm + 4, 0x5A01u);
     ota_wr16(parm + 6, 0x5441u);
-    for (i = 0; i < 12u; i++)
-        parm[8 + i] = (uint8_t)"ota-FM-1_015"[i];    /* the loader's own USB identity */
+    for (i = 0; i + 1u < sizeof OTA_LOADER_ID && i < 63u; i++)
+        parm[8 + i] = (uint8_t)OTA_LOADER_ID[i];     /* the loader's own USB identity */
     ota_wr32(parm + 72, OTA_AREA);
     ota_wr16(parm, ota_crc16(parm + 2, 78, 0));
 #if FELUCCA_OTA_DRYRUN
