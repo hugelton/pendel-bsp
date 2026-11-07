@@ -19,7 +19,8 @@
  * (fm1_cpu1_wait). One job at a time, a single writer for each word, csync around each (the cores share the
  * caches): CPU0's words, then CPU1's on a cache line of their own. CPU1's loop is in RAM (.c1_text, copied at
  * boot), so an idle CPU1 never fetches from the flash; the job itself runs from the flash, so CPU0 turns the flash
- * off only with no job outstanding (the render waits for its job before it returns: never off under it).
+ * off only with no job outstanding. The RAM loop acknowledges idle to the flash driver; dispatch revokes
+ * that permission before publishing a job. Flash entry points refuse a busy or unknown CPU1.
  *
  * Units that cannot run it (keremimo/melodee#17, charlesvestal/fm1-x0x#10; measured by Jangada,
  * github.com/zednaked/jangada): on some FM-1s CPU1 now and then reads shared RAM wrong (0x00200000 where it holds
@@ -48,10 +49,17 @@
 #pragma once
 #include <stdint.h>
 #include "fm1_cc.h"
+#if defined(FM1_FLASH_GATE_CPU1) && !FM1_FLASH_GATE_CPU1
+#error "fm1_cpu1.h: the flash gate (fm1_flash_access.h) was built without FM1_CPU1: define FM1_CPU1 1 before the first BSP header"
+#endif
+#ifndef FM1_CPU1
+#define FM1_CPU1 1                                /* (fm1_irq.h and the flash gate check it) */
+#endif
 #include "fm1_time.h"
 #include "fm1_irq.h"
 #include "fm1_guard.h"
 #include "fm1_cpu1_stop.h"
+#include "fm1_flash_access.h"
 #include "fm1_sys.h"
 
 #ifndef FM1_CPU1_FALLBACK
@@ -72,7 +80,13 @@ enum { FM1_CPU1_MISREAD = 1, FM1_CPU1_LATE = 2, FM1_CPU1_BARRED = 3, FM1_CPU1_FA
 
 extern void fm1_cpu1_entry(void);                       /* fm1_cpu1.S */
 extern uint32_t fm1_cpu1_ustack[], fm1_cpu1_sstack_top[];
-#define FM1_CPU1_USTACK_WORDS (2816u / 4u)              /* (fm1_cpu1.S) */
+#ifndef FM1_CPU1_USTACK_BYTES
+#define FM1_CPU1_USTACK_BYTES 2816                      /* the jobs' stack, bytes (fm1_cpu1.S reads the same macro): a build may
+                                                         * set more for deeper jobs, a multiple of 8, the lowest 256 B a guard */
+#endif
+#define FM1_CPU1_USTACK_WORDS (FM1_CPU1_USTACK_BYTES / 4u)   /* (fm1_cpu1.S) */
+_Static_assert(FM1_CPU1_USTACK_BYTES % 8 == 0 && FM1_CPU1_USTACK_BYTES > 256,
+               "FM1_CPU1_USTACK_BYTES: a multiple of 8, above the 256 B guard");
 #define FM1_CPU1_MARK 0x43314D4Bu                       /* "C1MK": how deep its stack has gone */
 
 typedef void (*fm1_cpu1_fn)(uint32_t);
@@ -131,6 +145,8 @@ void __attribute__((section(".c1_text"), noreturn, used)) fm1_cpu1_main(void)
     FM1_C1_EMU_CON = (FM1_C1_EMU_CON & ~((1u << 2) | (0x1Fu << 16))) | (1u << 3);
     done = fm1_cpu1_mb.complete;
     FM1_CPU1_SYNC();
+    fm1_flash_cpu1_idle = 1;
+    FM1_CPU1_SYNC();
     fm1_cpu1_mb.ready = 1;
     FM1_CPU1_SYNC();
     for (;;) {
@@ -145,6 +161,8 @@ void __attribute__((section(".c1_text"), noreturn, used)) fm1_cpu1_main(void)
                 fn(arg);                        /* the work itself runs from the flash */
                 fm1_cpu1_mb.jobs++;
                 done = request;
+                FM1_CPU1_SYNC();
+                fm1_flash_cpu1_idle = 1;
                 FM1_CPU1_SYNC();
                 fm1_cpu1_mb.complete = request;
                 FM1_CPU1_SYNC();
@@ -205,6 +223,7 @@ static int fm1_cpu1_start(void)
     }
     for (i = 0; i < FM1_CPU1_USTACK_WORDS; i++)
         fm1_cpu1_ustack[i] = FM1_CPU1_MARK;
+    fm1_flash_cpu1_idle = 0;
     fm1_cpu1_mb.ready = 0;
     fm1_cpu1_mb.request = 0;
     fm1_cpu1_mb.complete = 0;
@@ -271,6 +290,8 @@ static inline int fm1_cpu1_run(fm1_cpu1_fn fn, uint32_t arg)
     if (!fm1_cpu1_on || (request = fm1_cpu1_mb.request) != fm1_cpu1_mb.complete)
         return 0;
     request++;
+    fm1_flash_cpu1_idle = 0;
+    FM1_CPU1_SYNC();
     fm1_cpu1_mb.fn = fn;
     fm1_cpu1_mb.arg = arg;
     fm1_cpu1_mb.check = FM1_CPU1_CHECK(fn, arg, request);
